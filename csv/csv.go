@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	FILE_NAME = "/csv/students.csv"
+	FILE_NAME = "students.csv"
 )
 
 func ProcessFile() {

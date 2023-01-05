@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	FILE_NAME = "students.csv"
+	FILE_NAME      = "students.csv"
+	MAX_GOROUTINES = 10
 )
 
 func ProcessFile() {
@@ -26,32 +27,88 @@ func ProcessFile() {
 	// }
 
 	// sequential processing
-	sequentialProcessing(users)
+	//sequentialProcessing(users)
+
+	concurrentProcessing(users)
 
 	// fmt.Printf("users %v\n", users)
 }
 
-func sequentialProcessing(users []*User) {
-	visited := make(map[string]bool)
-	for _, user := range users {
-		if !visited[user.Id] {
-			visited[user.Id] = true
-			sendSmsNotification(user)
-			for _, friendId := range user.FriendIds {
-				friend, err := findUserById(friendId, users)
-				if err != nil {
-					fmt.Printf("Error %v\n", err)
-					continue
-				}
+func concurrentProcessing(users []*User) {
+	usersCh := make(chan []*User)
+	unvisitedUsers := make(chan *User)
+	go func() {
+		usersCh <- users
+	}()
+	initializeWorkers(unvisitedUsers, usersCh, users)
+	processUsers(unvisitedUsers, usersCh, len(users))
+}
 
-				if !visited[friend.Id] {
-					visited[friend.Id] = true
-					sendSmsNotification(friend)
+func initializeWorkers(unvisitedUsers <-chan *User, usersCh chan []*User, users []*User) {
+	for i := 0; i < MAX_GOROUTINES; i++ {
+		go func() {
+			for user := range unvisitedUsers {
+				sendSmsNotification(user)
+				go func(user *User) {
+					friendIds := user.FriendIds
+					friends := []*User{}
+					for _, friendId := range friendIds {
+						friend, err := findUserById(friendId, users)
+						if err != nil {
+							fmt.Printf("Error %v\n", err)
+							continue
+						}
+						friends = append(friends, friend)
+					}
+
+					_, ok := <-usersCh
+					if ok {
+						usersCh <- friends
+					}
+				}(user)
+			}
+		}()
+	}
+}
+
+func processUsers(unvisitedUsers chan<- *User, usersCh chan []*User, size int) {
+	visitedUsers := make(map[string]bool)
+	count := 0
+	for users := range usersCh {
+		for _, user := range users {
+			if !visitedUsers[user.Id] {
+				visitedUsers[user.Id] = true
+				count++
+				if count >= size {
+					close(usersCh)
 				}
+				unvisitedUsers <- user
 			}
 		}
 	}
 }
+
+// func sequentialProcessing(users []*User) {
+// 	visited := make(map[string]bool)
+// 	for _, user := range users {
+// 		if !visited[user.Id] {
+// 			visited[user.Id] = true
+// 			sendSmsNotification(user)
+// 			for _, friendId := range user.FriendIds {
+// 				friend, err := findUserById(friendId, users)
+// 				if err != nil {
+// 					fmt.Printf("Error %v\n", err)
+// 					continue
+// 				}
+
+// 				if !visited[friend.Id] {
+// 					visited[friend.Id] = true
+// 					sendSmsNotification(friend)
+// 				}
+// 			}
+// 		}
+// 	}
+// }
 
 func sendSmsNotification(user *User) {
 	time.Sleep(10 * time.Millisecond)
